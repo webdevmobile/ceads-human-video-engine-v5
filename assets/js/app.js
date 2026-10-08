@@ -10,7 +10,7 @@
   const formatPrice = (value) => `${money.format(value).replace(/\u202f/g, " ")} FCFA`;
 
   // ------------------------------------------------------------
-  // VIDEO PLAYER V25 — interactions mobiles + contrôles intelligents.
+  // VIDEO PLAYER V26 — mobile-first, réseau faible, contrôles stables.
   // ------------------------------------------------------------
   function normalizeVideoUrl(url) {
     return String(url || "")
@@ -83,10 +83,12 @@
     if (wistiaOembedByUrl.has(cleanUrl)) return wistiaOembedByUrl.get(cleanUrl);
 
     try {
-      const cached = sessionStorage.getItem(WISTIA_CACHE_PREFIX + cleanUrl);
+      const cacheKey = WISTIA_CACHE_PREFIX + cleanUrl;
+      const cached = localStorage.getItem(cacheKey) || sessionStorage.getItem(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed?.id) {
+        const age = Date.now() - Number(parsed?.cachedAt || 0);
+        if (parsed?.id && (!parsed.cachedAt || age < 7 * 24 * 60 * 60 * 1000)) {
           const ready = Promise.resolve(parsed);
           wistiaOembedByUrl.set(cleanUrl, ready);
           return ready;
@@ -138,9 +140,12 @@
             width: width > 0 ? width : 0,
             height: height > 0 ? height : 0,
             thumbnailUrl: String(data?.thumbnail_url || "").trim(),
-            title: String(data?.title || "").trim()
+            title: String(data?.title || "").trim(),
+            cachedAt: Date.now()
           };
-          try { sessionStorage.setItem(WISTIA_CACHE_PREFIX + cleanUrl, JSON.stringify(meta)); } catch {}
+          try { localStorage.setItem(WISTIA_CACHE_PREFIX + cleanUrl, JSON.stringify(meta)); } catch {
+            try { sessionStorage.setItem(WISTIA_CACHE_PREFIX + cleanUrl, JSON.stringify(meta)); } catch {}
+          }
           cleanup();
           resolve(meta);
         } catch (error) {
@@ -666,13 +671,6 @@
     slot.insertAdjacentElement("afterend", hint);
   });
 
-  warmProviderConnections();
-  window.setTimeout(() => {
-    const providers = new Set(Object.values(videoUrls).map((url) => detectProvider(url)).filter(Boolean));
-    if (providers.has("wistia")) ensureScript("https://fast.wistia.com/player.js").catch(() => {});
-    if (providers.has("vimeo")) primeVimeoSdk();
-  }, 120);
-
   // ------------------------------------------------------------
   // MEDIA ENGINE V22
   // Objectif : page légère sur connexion lente + aucun remplacement du player
@@ -683,9 +681,15 @@
   const saveData = Boolean(connection?.saveData);
   const slowNetwork = saveData || ["slow-2g", "2g", "3g"].includes(effectiveType);
   const verySlowNetwork = saveData || ["slow-2g", "2g"].includes(effectiveType);
+  const isMobileOrTablet = window.matchMedia("(max-width: 1024px)").matches || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
   if (slowNetwork) document.documentElement.classList.add("network-slow");
-  const maxConcurrentPreviews = verySlowNetwork ? 1 : slowNetwork ? 2 : 3;
-  const previewRootMargin = verySlowNetwork ? "1200px 0px" : slowNetwork ? "1800px 0px" : "2600px 0px";
+  if (isMobileOrTablet) document.documentElement.classList.add("device-mobile");
+  // Une seule connexion vidéo lourde à la fois sur mobile/tablette. Cela évite
+  // que YouTube/Wistia/Vimeo saturent une connexion 3G/4G instable.
+  const maxConcurrentPreviews = isMobileOrTablet ? 1 : (verySlowNetwork ? 1 : slowNetwork ? 1 : 2);
+  const previewRootMargin = isMobileOrTablet
+    ? (verySlowNetwork ? "80px 0px" : slowNetwork ? "140px 0px" : "320px 0px")
+    : (verySlowNetwork ? "300px 0px" : slowNetwork ? "600px 0px" : "1000px 0px");
 
   const wistiaMetaPromises = new Map();
   const controllerBySlot = new Map();
@@ -694,6 +698,28 @@
   const queuedSlotIds = new Set();
   let activePreviewLoads = 0;
   const slots = [...document.querySelectorAll("[data-media-slot]")];
+
+  function scheduleNonCriticalNetworkWork() {
+    const run = () => {
+      // Les polices de marque ne bloquent jamais le premier affichage. Sur 2G /
+      // économie de données, on conserve les polices système pour privilégier la page.
+      if (!saveData && !verySlowNetwork && !document.querySelector('link[data-ceads-fonts]')) {
+        const fontLink = document.createElement("link");
+        fontLink.rel = "stylesheet";
+        fontLink.href = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap";
+        fontLink.dataset.ceadsFonts = "1";
+        document.head.appendChild(fontLink);
+      }
+      // Préconnexion uniquement au fournisseur de la VSL. Les autres fournisseurs
+      // seront préchauffés au moment où leur cadre approche de l'écran.
+      const vslUrl = normalizeVideoUrl(videoUrls.vsl || "");
+      providerOrigins(vslUrl).forEach(addConnectionHint);
+    };
+    const delay = isMobileOrTablet ? (slowNetwork ? 2200 : 1100) : 350;
+    if (document.readyState === "complete") window.setTimeout(run, delay);
+    else window.addEventListener("load", () => window.setTimeout(run, delay), { once: true });
+  }
+  scheduleNonCriticalNetworkWork();
 
   function applyVideoAspect(slot, width, height) {
     const w = Number(width || 0);
@@ -715,7 +741,7 @@
           if (poster) {
             poster.src = meta.thumbnailUrl;
             poster.alt = meta.title ? `Aperçu : ${meta.title}` : "Aperçu de la vidéo";
-            poster.loading = "eager";
+            poster.loading = "lazy";
             poster.decoding = "async";
             poster.classList.add("media-poster--wistia");
           }
@@ -731,24 +757,9 @@
     return promise;
   }
 
-  // Métadonnées légères uniquement. On ne charge PAS les iframes hors écran.
-  slots.forEach((slot) => {
-    const slotId = slot.dataset.mediaSlot;
-    const url = normalizeVideoUrl(videoUrls[slotId] || "");
-    if (!url) return;
-    const provider = detectProvider(url);
-    if (provider === "wistia") preloadWistiaForSlot(slot, slotId, url);
-    if (provider === "youtube" && slotId !== "vsl") {
-      const id = getYouTubeId(url);
-      const poster = slot.querySelector(".media-poster");
-      if (id && poster) {
-        poster.src = `https://i.ytimg.com/vi/${id}/${verySlowNetwork ? "mqdefault" : "hqdefault"}.jpg`;
-        poster.loading = "eager";
-        poster.fetchPriority = slotId === "vsl" ? "high" : "low";
-        poster.decoding = "async";
-      }
-    }
-  });
+  // V26 : aucun appel Wistia/Vimeo/YouTube n'est lancé pour les vidéos hors écran.
+  // Les posters locaux restent visibles immédiatement ; les métadonnées Wistia
+  // et la miniature native sont récupérées seulement quand le cadre approche.
 
   function createControllerNode(provider, title) {
     const wrap = document.createElement("div");
@@ -771,7 +782,7 @@
       const params = new URLSearchParams({
         autoplay: "1", mute: "1", loop: "1", playlist: id,
         controls: "0", rel: "0", playsinline: "1", enablejsapi: "1",
-        iv_load_policy: "3", fs: "0", disablekb: "1"
+        iv_load_policy: "3", fs: "0", disablekb: "1", cc_load_policy: "0"
       });
       if (location.protocol === "http:" || location.protocol === "https:") {
         params.set("origin", location.origin);
@@ -1173,7 +1184,14 @@
   // pénaliser le LCP. Sur réseau lent, le poster reste immédiatement disponible.
   const vslSlot = document.querySelector('[data-media-slot="vsl"]');
   if (vslSlot) {
-    window.setTimeout(() => enqueuePreview(vslSlot, { priority: true }), verySlowNetwork ? 420 : slowNetwork ? 240 : 80);
+    const prepareVsl = () => {
+      const delay = isMobileOrTablet
+        ? (verySlowNetwork ? 1500 : slowNetwork ? 1050 : 650)
+        : (slowNetwork ? 350 : 120);
+      window.setTimeout(() => enqueuePreview(vslSlot, { priority: true }), delay);
+    };
+    if (document.readyState === "complete") prepareVsl();
+    else window.addEventListener("load", prepareVsl, { once: true });
   }
 
   // Préparation en avance : les lecteurs commencent à s'initialiser bien AVANT d'entrer
@@ -1195,16 +1213,15 @@
   // Après le rendu initial, on prépare progressivement les premiers lecteurs hors écran.
   // On ne lance pas 10 flux vidéo à la fois : cela tuerait précisément les connexions lentes.
   const idlePrepare = () => {
-    const count = verySlowNetwork ? 2 : slowNetwork ? 4 : 6;
-    nonVslSlots.slice(0, count).forEach((slot, index) => {
-      window.setTimeout(() => enqueuePreview(slot), index * (verySlowNetwork ? 900 : slowNetwork ? 520 : 260));
+    // Desktop rapide uniquement. Sur mobile/3G, préparer des lecteurs hors écran
+    // gaspille la bande passante et ralentit la page principale.
+    if (isMobileOrTablet || slowNetwork) return;
+    nonVslSlots.slice(0, 3).forEach((slot, index) => {
+      window.setTimeout(() => enqueuePreview(slot), index * 420);
     });
   };
-  if ("requestIdleCallback" in window) {
-    requestIdleCallback(idlePrepare, { timeout: verySlowNetwork ? 2200 : 1200 });
-  } else {
-    window.setTimeout(idlePrepare, verySlowNetwork ? 1200 : 500);
-  }
+  if ("requestIdleCallback" in window) requestIdleCallback(idlePrepare, { timeout: 1800 });
+  else window.setTimeout(idlePrepare, 900);
 
   // Les previews hors écran sont mises en pause : moins de data, moins de CPU/GPU,
   // et plus de bande passante pour la vidéo que l'utilisateur regarde vraiment.
@@ -1254,6 +1271,26 @@
     usingSamplePurchases = true;
   }
   let cursor = 0;
+  let randomBag = [];
+
+  function refillRandomBag() {
+    randomBag = purchases.map((_, index) => index);
+    for (let i = randomBag.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [randomBag[i], randomBag[j]] = [randomBag[j], randomBag[i]];
+    }
+  }
+
+  function nextPurchase() {
+    if (!purchases.length) return null;
+    if (notificationConfig.randomOrder) {
+      if (!randomBag.length) refillRandomBag();
+      return purchases[randomBag.pop()];
+    }
+    const item = purchases[cursor % purchases.length];
+    cursor += 1;
+    return item;
+  }
 
   function timeAgo(purchase) {
     if (purchase && Number.isFinite(Number(purchase.minutesAgo))) {
@@ -1337,14 +1374,29 @@
     if (!purchases.length) return;
 
     const showNext = () => {
-      const purchase = purchases[cursor % purchases.length];
-      cursor += 1;
-      renderPurchase(purchase);
+      const purchase = nextPurchase();
+      if (purchase) renderPurchase(purchase);
     };
 
-    window.setTimeout(showNext, 1600);
-    window.setInterval(showNext, Math.max(10000, Number(notificationConfig.intervalMs || 30000)));
+    const begin = () => {
+      const firstDelay = Math.max(0, Number(notificationConfig.firstDelayMs || 30000));
+      window.setTimeout(() => {
+        showNext();
+        window.setInterval(showNext, Math.max(10000, Number(notificationConfig.intervalMs || 30000)));
+      }, firstDelay);
+    };
+
+    if (document.readyState === "complete") begin();
+    else window.addEventListener("load", begin, { once: true });
   }
 
   startPurchaseNotifications();
+
+  // Cache shell after the first successful load. This does not compete with LCP,
+  // but subsequent visits can recover even if the mobile connection drops.
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    window.addEventListener("load", () => {
+      window.setTimeout(() => navigator.serviceWorker.register("./sw.js").catch(() => {}), 2500);
+    }, { once: true });
+  }
 })();

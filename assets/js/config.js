@@ -7,7 +7,7 @@
  *
  * IMPORTANT :
  * - purchases / endpoint = données réelles affichées comme vérifiées.
- * - samplePurchases peut être affiché publiquement uniquement comme DÉMO clairement signalée.
+ * - samplePurchases = profils fictifs affichés publiquement uniquement comme DÉMO clairement signalée.
  */
 window.CEADS_CONFIG = {
   checkoutUrl: "https://lumina-ebooks.mychariow.com/laverie-domicile/checkout",
@@ -25,8 +25,10 @@ window.CEADS_CONFIG = {
 
   purchaseNotifications: {
     enabled: true,
+    firstDelayMs: 30000,
     intervalMs: 60000,
     visibleMs: 6500,
+    randomOrder: true,
     actionText: "vient de rejoindre la formation",
     // sampleActionText: "exemple de notification d’inscription",
     showSamplesPublicly: true,
@@ -64,9 +66,8 @@ window.CEADS_CONFIG = {
       { name: "Fanta", country: "Sénégal", countryCode: "SN", minutesAgo: 1080 },
       { name: "Rodrigue", country: "Togo", countryCode: "TG", minutesAgo: 2160 }
     ],
-    endpoint: "",
 
-    // Ces entrées sont des exemples et restent visiblement marquées « DÉMO » sur le site public.
+    // Profils fictifs de démonstration : affichés publiquement avec le badge DÉMO.
     // samplePurchases: [
     //   { name: "Jonathan", country: "Cameroun", countryCode: "CM", minutesAgo: 32 },
     //   { name: "Aïcha", country: "Côte d’Ivoire", countryCode: "CI", minutesAgo: 120 },
@@ -98,6 +99,7 @@ window.CEADS_CONFIG = {
     //   { name: "Junior", country: "RDC", countryCode: "CD", minutesAgo: 25 },
     //   { name: "Fanta", country: "Sénégal", countryCode: "SN", minutesAgo: 1080 },
     //   { name: "Rodrigue", country: "Togo", countryCode: "TG", minutesAgo: 2160 }
-    // ]
+    // ],
+    // endpoint: "",
   }
 };

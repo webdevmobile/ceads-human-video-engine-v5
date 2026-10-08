@@ -2208,3 +2208,28 @@ html.network-slow .big-idea::after {
 .media-embed[data-provider="wistia"] wistia-player {
   --ceads-wistia-controls-policy: auto;
 }
+
+
+/* =========================================================
+   V26 — Mobile reliability / low-bandwidth first paint
+   ========================================================= */
+html.device-mobile.network-slow .hero__glow,
+html.device-mobile.network-slow .big-idea::after {
+  display: none !important;
+}
+html.device-mobile.network-slow .site-header,
+html.device-mobile.network-slow .launch-bar,
+html.device-mobile.network-slow .media-card,
+html.device-mobile.network-slow .module-card,
+html.device-mobile.network-slow .bonus-card {
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* Le poster local reste toujours immédiatement visible tant que le fournisseur
+   externe n'a pas réellement rendu la vidéo. */
+.media-placeholder:not(.is-player-ready) .media-poster,
+.format-card__media:not(.is-player-ready) .media-poster {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
