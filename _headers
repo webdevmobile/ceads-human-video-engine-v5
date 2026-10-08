@@ -1,0 +1,13 @@
+/assets/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+
+/site.webmanifest
+  Cache-Control: public, max-age=86400
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: autoplay=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://player.vimeo.com" "https://fast.wistia.com" "https://fast.wistia.net")
+

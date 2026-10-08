@@ -1,0 +1,9 @@
+{
+  "name": "CEADS Human Video Engine",
+  "short_name": "Human Video Engine",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#08111F",
+  "theme_color": "#08111F",
+  "icons": []
+}
